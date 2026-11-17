@@ -6,9 +6,13 @@ The binder URL is here: https://mybinder.org/v2/gh/ontoligent/ds2023-binder/main
 
 **Dashboards**
 
+- [Nightingale](https://mybinder.org/v2/gh/ontoligent/DS2023-binder/HEAD?urlpath=voila%2Frender%2Fdashboards/nightingale-prompt.ipynb)
 - [Titanic](https://mybinder.org/v2/gh/ontoligent/DS2023-binder/HEAD?urlpath=voila%2Frender%2Fdashboards/titanic-exploration.ipynb)
 - [Tips](https://mybinder.org/v2/gh/ontoligent/DS2023-binder/HEAD?urlpath=voila%2Frender%2Fdashboards/tipping-dashboard.ipynb)
 - [Penguins](https://mybinder.org/v2/gh/ontoligent/DS2023-binder/HEAD?urlpath=voila%2Frender%2Fdashboards/penguins-dashboard.ipynb)
 - [MPG](https://mybinder.org/v2/gh/ontoligent/DS2023-binder/HEAD?urlpath=voila%2Frender%2Fdashboards/mpg-explorer.ipynb)
 
-
+Pattern:
+```
+https://mybinder.org/v2/gh/ontoligent/DS2023-binder/HEAD?urlpath=voila%2Frender%2F<notebook-path>
+```
