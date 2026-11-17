@@ -6,9 +6,7 @@ The binder URL is here: https://mybinder.org/v2/gh/ontoligent/ds2023-binder/main
 
 **Dashboards**
 
-```
-titanic-exploration.ipynb
-tipping-dashboard.ipynb
-penguins-dashboard.ipynb
-mpg-explorer.ipynb
-```
+- [Titanic](https://mybinder.org/v2/gh/ontoligent/ds/HEAD?urlpath=voila%2Frender%2Ftitanic-exploration.ipynb)
+- [Tips](https://mybinder.org/v2/gh/ontoligent/ds/HEAD?urlpath=voila%2Frender%2Ftipping-dashboard.ipynb)
+- [Penguins](https://mybinder.org/v2/gh/ontoligent/ds/HEAD?urlpath=voila%2Frender%2Fpenguins-dashboard.ipynb)
+- [MPG](https://mybinder.org/v2/gh/ontoligent/ds/HEAD?urlpath=voila%2Frender%2Fmpg-explorer.ipynb)
