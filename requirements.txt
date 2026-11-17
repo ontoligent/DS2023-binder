@@ -8,3 +8,4 @@ scikit-learn>=1.9
 scipy>=1.18
 seaborn>=0.13
 statsmodels>=0.14
+voila
