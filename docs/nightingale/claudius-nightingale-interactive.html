@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nightingale's Rose, Interactive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Lato:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  /* ---------- Design tokens ---------------------------------------------- */
+  :root {
+    --parchment: #F4EEE4;      /* page / plate background */
+    --paper-2:   #EBE3D5;      /* panels */
+    --ink:       #2B2623;      /* primary text */
+    --ink-2:     #5C544D;      /* secondary text */
+    --ink-3:     #8A8178;      /* muted text, gridlines */
+    --rule:      #D5CBBB;
+
+    --disease:        #AFCFD9; /* blue petals  */
+    --disease-edge:   #6E98A6;
+    --disease-line:   #4A7F92;
+    --wounds:         #EBD3CE; /* red / pink petals */
+    --wounds-edge:    #BF968C;
+    --wounds-line:    #B0675A;
+    --other:          #7A7672; /* black petals */
+    --other-edge:     #2B2826;
+    --other-line:     #3E3A37;
+
+    --accent:    #A8741A;      /* highlight for "order changed" months */
+    --focus:     #1D1A18;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--parchment); color: var(--ink); }
+  body {
+    font-family: "Lato", "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px; line-height: 1.45;
+  }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  h1, h2, .serif { font-family: "EB Garamond", Garamond, "Times New Roman", serif; font-weight: 400; }
+  h1 { font-size: 30px; line-height: 1.15; margin: 0 0 4px; letter-spacing: .01em; }
+  h2 { font-size: 21px; margin: 28px 0 6px; }
+  .subtitle { color: var(--ink-2); margin: 0 0 16px; max-width: 70ch; }
+
+  /* ---------- Controls --------------------------------------------------- */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-start;
+    padding: 12px 14px; background: var(--paper-2); border: 1px solid var(--rule); border-radius: 6px;
+  }
+  fieldset { border: 0; margin: 0; padding: 0; }
+  legend.ctl { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 4px; padding: 0; }
+  .seg { display: inline-flex; border: 1px solid var(--ink-3); border-radius: 5px; overflow: hidden; }
+  .seg button {
+    font: inherit; font-size: 14px; padding: 5px 10px; border: 0; background: transparent; color: var(--ink); cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--ink-3); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--parchment); }
+  .seg button:focus-visible, .legend-item:focus-visible, .note-marker:focus-visible, .check input:focus-visible {
+    outline: 2px solid var(--focus); outline-offset: 2px;
+  }
+  .check { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; padding-top: 5px; cursor: pointer; }
+  .status { font-size: 13px; color: var(--ink-2); margin-top: 5px; min-height: 1.2em; }
+  .status strong { color: var(--accent); }
+  .warn { color: #8B3A2B; }
+
+  /* ---------- Cause legend (also the filter) ----------------------------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 14px 0 0; }
+  .legend-item {
+    display: inline-flex; align-items: center; gap: 8px; font: inherit; font-size: 14px;
+    border: 1px solid var(--rule); background: var(--parchment); border-radius: 999px; padding: 4px 12px 4px 6px; cursor: pointer; color: var(--ink);
+  }
+  .legend-item .sw { width: 22px; height: 14px; border-radius: 2px; border: 1.5px solid; }
+  .legend-item[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+  .legend-item.dimmed { opacity: .45; }
+  .legend-hint { font-size: 13px; color: var(--ink-3); align-self: center; }
+
+  /* ---------- The plate ------------------------------------------------- */
+  .figure { position: relative; margin-top: 8px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+  .petal { stroke-width: 0.9; transition: opacity .25s; cursor: default; }
+  .petal:focus { outline: none; }                    /* focus is drawn by .focus-ring */
+  .petal.disease { fill: var(--disease); stroke: var(--disease-edge); }
+  .petal.wounds  { fill: var(--wounds);  stroke: var(--wounds-edge); }
+  .petal.other   { fill: var(--other);   stroke: var(--other-edge); }
+  .other-outline { fill: none; stroke: var(--other-edge); stroke-width: 1.3; pointer-events: none; transition: opacity .25s; }
+  .faded { opacity: .12; }
+  .month-dim { opacity: .38; }
+
+  .month-bg { fill: transparent; stroke: none; }
+  .month-bg.changed { fill: rgba(168,116,26,.10); stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .month-bg.hovered { fill: rgba(43,38,35,.07); }
+
+  .month-label {
+    font-family: "Lato", "Helvetica Neue", Arial, sans-serif; font-weight: 700; font-size: 11.5px;
+    letter-spacing: .14em; fill: var(--ink); pointer-events: none;
+  }
+  .month-label.changed { fill: var(--accent); }
+  .month-label.hovered { text-decoration: underline; }
+  .caption-text { font-family: "EB Garamond", Garamond, serif; font-size: 19px; fill: var(--ink); letter-spacing: .06em; }
+  .connector { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 5 4; fill: none; }
+  .focus-halo { fill: none; stroke: #fff; stroke-width: 5; pointer-events: none; }
+  .focus-ring { fill: none; stroke: var(--focus); stroke-width: 2.2; stroke-dasharray: 6 3; pointer-events: none; }
+
+  /* ---------- Teaching readout ------------------------------------------ */
+  .readout {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 24px;
+    margin-top: 6px; padding: 10px 14px; border-left: 3px solid var(--ink-3); background: rgba(235,227,213,.6);
+    font-size: 14px;
+  }
+  .readout b { font-variant-numeric: tabular-nums; }
+  .readout .big { font-size: 20px; font-weight: 700; }
+
+  /* ---------- Nightingale's legend -------------------------------------- */
+  .nlegend {
+    font-family: "EB Garamond", Garamond, "Times New Roman", serif; font-style: italic; font-size: 17px; line-height: 1.5;
+    margin: 18px 0 0; padding: 14px 18px; border: 1px solid var(--rule); background: rgba(255,255,255,.25); max-width: 820px;
+  }
+  .nlegend .cite { display: block; font-style: normal; font-size: 13px; color: var(--ink-3); margin-top: 6px; font-family: "Lato", sans-serif; }
+  .flagged { text-decoration: underline dotted var(--accent); text-underline-offset: 3px; }
+  .note-marker {
+    display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 3px;
+    border-radius: 50%; border: 1.5px solid var(--accent); color: var(--accent); background: var(--parchment);
+    font: 700 11px/1 "Lato", sans-serif; font-style: normal; cursor: help; vertical-align: 2px; padding: 0;
+  }
+
+  /* ---------- Line chart ------------------------------------------------- */
+  .axis text { font-family: "Lato", sans-serif; font-size: 11px; fill: var(--ink-2); }
+  .axis path, .axis line { stroke: var(--ink-3); }
+  .grid line { stroke: var(--rule); stroke-width: 1; }
+  .grid path { display: none; }
+  .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; transition: opacity .25s; }
+  .series.disease { stroke: var(--disease-line); }
+  .series.wounds  { stroke: var(--wounds-line); }
+  .series.other   { stroke: var(--other-line); }
+  .series-label { font-family: "Lato", sans-serif; font-size: 12px; font-weight: 700; fill: var(--ink); transition: opacity .25s; }
+  .hover-rule { stroke: var(--ink); stroke-width: 1; }
+  .hover-dot { stroke: var(--parchment); stroke-width: 2; }
+  .changed-tick { fill: var(--accent); }
+  .year-divider { stroke: var(--ink-3); stroke-dasharray: 3 3; }
+  .year-tag { font-family: "EB Garamond", serif; font-size: 14px; fill: var(--ink-2); }
+
+  /* ---------- Tooltip --------------------------------------------------- */
+  .tooltip {
+    position: fixed; z-index: 10; pointer-events: none; max-width: 300px;
+    background: #FFFDF8; color: var(--ink); border: 1px solid var(--ink-3); border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.15); padding: 8px 10px; font-size: 13px; line-height: 1.4;
+    opacity: 0; transition: opacity .12s;
+  }
+  .tooltip.show { opacity: 1; }
+  .tooltip .tt-title { font-weight: 700; margin-bottom: 3px; }
+  .tooltip .tt-cause { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+  .tooltip .sw { width: 12px; height: 12px; border-radius: 2px; border: 1.5px solid; flex: none; }
+  .tooltip table { border-collapse: collapse; margin-top: 4px; }
+  .tooltip td { padding: 1px 0; vertical-align: top; }
+  .tooltip td:first-child { color: var(--ink-2); padding-right: 10px; }
+  .tooltip td:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+  .tooltip .muted { color: var(--ink-3); }
+
+  /* ---------- Details / data table ------------------------------------- */
+  details { margin-top: 18px; border-top: 1px solid var(--rule); padding-top: 10px; }
+  summary { cursor: pointer; font-weight: 700; }
+  .tablewrap { overflow-x: auto; }
+  table.data { border-collapse: collapse; font-size: 13px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  table.data th, table.data td { padding: 3px 8px; border-bottom: 1px solid var(--rule); text-align: right; white-space: nowrap; }
+  table.data th:first-child, table.data td:first-child { text-align: left; }
+  table.data tr.changed td:first-child::after { content: " ◆"; color: var(--accent); }
+  .checks li { font-variant-numeric: tabular-nums; }
+  .ok { color: #2F6B3A; font-weight: 700; }
+  .bad { color: #8B3A2B; font-weight: 700; }
+  .kbd-help { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+  kbd { font: 12px "Lato", sans-serif; border: 1px solid var(--ink-3); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: #fff; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Diagram of the Causes of Mortality in the Army in the East</h1>
+  <p class="subtitle serif" style="font-size:17px">After Florence Nightingale (1858). Each wedge is one month; its <em>area</em>
+    shows the annual rate of mortality per 1,000 men. Hover or tab to a wedge for its numbers.</p>
+
+  <!-- ===== Controls ===== -->
+  <div class="controls" role="region" aria-label="Chart controls">
+    <fieldset>
+      <legend class="ctl">Stacking order</legend>
+      <div class="seg" id="ctl-stack">
+        <button type="button" data-val="engraved" aria-pressed="true">As engraved</button>
+        <button type="button" data-val="largest" aria-pressed="false">Largest at the back</button>
+      </div>
+      <div class="status" id="stack-status" aria-live="polite"></div>
+    </fieldset>
+    <fieldset>
+      <legend class="ctl">Encoding</legend>
+      <div class="seg" id="ctl-enc">
+        <button type="button" data-val="area" aria-pressed="true">Area ∝ rate (radius = √rate)</button>
+        <button type="button" data-val="radius" aria-pressed="false">Radius ∝ rate</button>
+      </div>
+      <div class="status" id="enc-status" aria-live="polite"></div>
+    </fieldset>
+    <fieldset>
+      <legend class="ctl">Outlines</legend>
+      <label class="check"><input type="checkbox" id="ctl-outline" checked> Draw black outlines on top</label>
+    </fieldset>
+  </div>
+
+  <div class="legend" id="legend" role="group" aria-label="Causes of death (click to isolate)"></div>
+
+  <!-- ===== The plate ===== -->
+  <div class="figure">
+    <svg id="rose" role="group" aria-label="Two rose diagrams of monthly mortality rates, April 1854 to March 1856. Use arrow keys to move between wedges."></svg>
+  </div>
+  <p class="kbd-help">Keyboard: <kbd>Tab</kbd> into the diagram, then <kbd>←</kbd> <kbd>→</kbd> to change month,
+    <kbd>↑</kbd> <kbd>↓</kbd> to change cause, <kbd>Home</kbd> / <kbd>End</kbd> for the first / last month, <kbd>Esc</kbd> to leave.</p>
+
+  <div class="readout" id="readout" aria-live="polite"></div>
+
+  <!-- ===== Nightingale's own legend (1858, public domain) ===== -->
+  <blockquote class="nlegend" id="nlegend">
+    The Areas of the blue, red, &amp; black wedges are each measured from the centre as the<br>
+    common vertex. The blue wedges measured from the centre of the circle represent area<br>
+    for area the deaths from Preventible or Mitigable Zymotic diseases; the red wedges<br>
+    measured from the centre the deaths from wounds; &amp; the black wedges measured from the<br>
+    centre the deaths from all other causes. The black line across the red triangle in<br>
+    Nov.<sup>r</sup> 1854 marks the boundary of the deaths from all other causes during the month.<br>
+    In October 1854, &amp; April 1855, the black area coincides with the red; <span class="flagged">in January &amp;<br>
+    February 1855, the blue coincides with the black.</span><button type="button" class="note-marker" id="note-marker"
+      aria-label="Note on this sentence" aria-describedby="note-text">?</button> The entire areas may be compared by<br>
+    following the blue, the red &amp; the black lines enclosing them.
+    <span class="cite">Legend text from Nightingale's plate (1858). Marker ? : a note on the year.</span>
+    <span class="sr-only" id="note-text"></span>
+  </blockquote>
+
+  <!-- ===== Linked line chart ===== -->
+  <h2>The same rates as lines</h2>
+  <p class="subtitle" style="margin-bottom:4px">Annual rate of mortality per 1,000, by month. Hover a month here or on the roses; both views follow.</p>
+  <div class="figure"><svg id="lines" role="img" aria-label="Line chart of the three mortality rates across 24 months. Disease peaks at 1,022.8 per 1,000 in January 1855."></svg></div>
+
+  <!-- ===== Data and checks ===== -->
+  <details>
+    <summary>Data table (rates computed on this page)</summary>
+    <div class="tablewrap"><table class="data" id="datatable"></table></div>
+    <p style="font-size:13px;color:var(--ink-2)">Rate = deaths ÷ army × 1,000 × 12 (Nightingale's annualised rate).
+      Order is back → front. ◆ = the two stacking orders differ.</p>
+  </details>
+  <details>
+    <summary>Checks computed on page load</summary>
+    <ul class="checks" id="checks"></ul>
+  </details>
+  <p style="font-size:12px;color:var(--ink-3);margin-top:20px">Data: Nightingale's table as in R <code>HistData::Nightingale</code>.
+    Stacking order (z) as engraved on the 1858 plate. Built for DS 2023.</p>
+</main>
+
+<div class="tooltip" id="tooltip" role="tooltip"></div>
+
+<script>
+"use strict";
+/* =========================================================================
+   1. DATA — Nightingale's table. z = stacking order as engraved (0 back, 2 front)
+   ========================================================================= */
+const RAW = [
+  // date,     army,  disease, wounds, other, dz, wz, oz
+  ["1854-04",  8571,     1,   0,   5, 0, 2, 1],
+  ["1854-05", 23333,    12,   0,   9, 0, 2, 1],
+  ["1854-06", 28333,    11,   0,   6, 0, 2, 1],
+  ["1854-07", 28722,   359,   0,  23, 0, 2, 1],
+  ["1854-08", 30246,   828,   1,  30, 0, 2, 1],
+  ["1854-09", 30290,   788,  81,  70, 0, 2, 1],
+  ["1854-10", 30643,   503, 132, 128, 0, 2, 1],
+  ["1854-11", 29736,   844, 287, 106, 0, 2, 1],
+  ["1854-12", 32779,  1725, 114, 131, 0, 2, 1],
+  ["1855-01", 32393,  2761,  83, 324, 0, 2, 1],
+  ["1855-02", 30919,  2120,  42, 361, 0, 2, 1],
+  ["1855-03", 30107,  1205,  32, 172, 0, 2, 1],
+  ["1855-04", 32252,   477,  48,  57, 0, 1, 2],
+  ["1855-05", 35473,   508,  49,  37, 0, 1, 2],
+  ["1855-06", 38863,   802, 209,  31, 0, 1, 2],
+  ["1855-07", 42647,   382, 134,  33, 0, 1, 2],
+  ["1855-08", 44614,   483, 164,  25, 0, 1, 2],
+  ["1855-09", 47751,   189, 276,  20, 1, 0, 2],
+  ["1855-10", 46852,   128,  53,  18, 0, 1, 2],
+  ["1855-11", 37853,   178,  33,  32, 0, 2, 1],
+  ["1855-12", 43217,    91,  18,  28, 0, 2, 1],
+  ["1856-01", 44212,    42,   2,  48, 0, 1, 2],
+  ["1856-02", 43485,    24,   0,  19, 0, 1, 2],
+  ["1856-03", 46140,    15,   0,  35, 2, 0, 1],
+];
+
+const CAUSES = [
+  { key: "disease", short: "Zymotic disease", long: "Preventible or mitigable zymotic diseases", fill: "#AFCFD9", edge: "#6E98A6" },
+  { key: "wounds",  short: "Wounds",          long: "Wounds",                                     fill: "#EBD3CE", edge: "#BF968C" },
+  { key: "other",   short: "All other causes", long: "All other causes",                          fill: "#7A7672", edge: "#2B2826" },
+];
+const CAUSE = Object.fromEntries(CAUSES.map(c => [c.key, c]));
+const MONTH_NAMES = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
+const monthTitle = s => s.charAt(0) + s.slice(1).toLowerCase();
+
+/** Nightingale's annual rate of mortality per 1,000. */
+const rateOf = (deaths, army) => deaths / army * 1000 * 12;
+
+/* Build one record per month, each holding its three petals. */
+const months = RAW.map((row, m) => {
+  const [date, army, d, w, o, dz, wz, oz] = row;
+  const [yy, mm] = date.split("-").map(Number);
+  const mo = {
+    m, date, army, year: m < 12 ? 0 : 1, slot: m % 12,
+    name: MONTH_NAMES[mm - 1], yearNum: yy,
+    title: `${monthTitle(MONTH_NAMES[mm - 1])} ${yy}`,
+  };
+  const deaths = { disease: d, wounds: w, other: o };
+  const zEng   = { disease: dz, wounds: wz, other: oz };
+  mo.petals = CAUSES.map((c, ci) => ({
+    month: mo, cause: c.key, ci, deaths: deaths[c.key], rate: rateOf(deaths[c.key], army), zEng: zEng[c.key],
+  }));
+  // "Largest at the back": rank rates descending; the largest gets z = 0.
+  // (Ties keep cause order disease → wounds → other; only zero-death petals tie.)
+  [...mo.petals].sort((a, b) => b.rate - a.rate || a.ci - b.ci).forEach((p, k) => p.zLarge = k);
+  mo.changed = mo.petals.some(p => p.zLarge !== p.zEng);
+  // Label: full month name; add the year to the first month of each rose and to January.
+  mo.label = (mo.slot === 0 || mm === 1) ? `${mo.name} ${yy}` : mo.name;
+  return mo;
+});
+const petals = months.flatMap(mo => mo.petals);
+petals.forEach((p, i) => p.idx = i);   // keyboard order: month by month, disease → wounds → other
+
+/* =========================================================================
+   2. SCALES — one k for both roses, in either encoding.
+   The largest rate (Jan 1855 disease) gets radius R_MAX in both modes, so
+   the two encodings are directly comparable.
+   ========================================================================= */
+const R_MAX = 300;
+const maxRate = d3.max(petals, p => p.rate);
+const K_AREA   = R_MAX / Math.sqrt(maxRate);   // radius = k·√rate  → area ∝ rate (correct)
+const K_RADIUS = R_MAX / maxRate;              // radius = k·rate   → area ∝ rate² (wrong)
+const radiusFor = (rate, enc) => enc === "area" ? K_AREA * Math.sqrt(rate) : K_RADIUS * rate;
+
+const SLICE = Math.PI / 6;                     // 30°
+// d3.arc measures angles clockwise from 12 o'clock; 9 o'clock is −π/2.
+const startAngle = slot => -Math.PI / 2 + slot * SLICE;
+const polar = (r, a) => [r * Math.sin(a), -r * Math.cos(a)];
+
+/* =========================================================================
+   3. STATE
+   ========================================================================= */
+const state = {
+  stacking: "engraved",   // or "largest"
+  encoding: "area",       // or "radius"
+  outlines: true,
+  isolate: null,          // a cause key, or null
+  hover: null,            // month index, or null
+  focusIdx: 0,            // roving-tabindex petal
+  showChanged: false,     // highlight months whose order differs (after first toggle)
+};
+const zOf = p => state.stacking === "engraved" ? p.zEng : p.zLarge;
+const POSITION = ["back", "middle", "front"];
+
+/* =========================================================================
+   4. ROSE SVG
+   ========================================================================= */
+const svg = d3.select("#rose");
+const ROSE_CX = [520, 0];     // year 1 on the right, year 2 on the left
+const ROSE_CY = 0;
+const arcGen = d3.arc().innerRadius(0);
+const petalPath = (p, r) => arcGen({ outerRadius: r, startAngle: startAngle(p.month.slot), endAngle: startAngle(p.month.slot) + SLICE });
+
+const root = svg.append("g");
+const connector = root.append("line").attr("class", "connector").attr("aria-hidden", "true");
+
+const roses = root.selectAll("g.year").data([0, 1]).join("g")
+  .attr("class", "year")
+  .attr("transform", y => `translate(${ROSE_CX[y]},${ROSE_CY})`);
+
+const bgLayer      = roses.append("g").attr("aria-hidden", "true");
+const petalLayer   = roses.append("g");
+const outlineLayer = roses.append("g").attr("aria-hidden", "true");
+const labelLayer   = roses.append("g").attr("aria-hidden", "true");
+const captionLayer = roses.append("g").attr("aria-hidden", "true");
+const focusLayer   = root.append("g").attr("aria-hidden", "true");
+const focusHalo = focusLayer.append("path").attr("class", "focus-halo").style("display", "none");
+const focusRing = focusLayer.append("path").attr("class", "focus-ring").style("display", "none");
+
+const monthsOf = y => months.filter(mo => mo.year === y);
+
+// Month background wedges: used for hover and "order changed" highlights.
+const bgs = bgLayer.selectAll("path").data(y => monthsOf(y)).join("path")
+  .attr("class", "month-bg")
+  .on("mouseenter", (e, mo) => setHover(mo.m))
+  .on("mouseleave", () => setHover(null));
+
+// One <g> per month; inside, three petals ordered by z (SVG paints in DOM order).
+const monthGroups = petalLayer.selectAll("g.month").data(y => monthsOf(y)).join("g").attr("class", "month");
+const petalSel = monthGroups.selectAll("path.petal").data(mo => mo.petals).join("path")
+  .attr("class", p => `petal ${p.cause}`)
+  .attr("role", "img")
+  .attr("tabindex", p => p.idx === state.focusIdx ? 0 : -1)
+  .on("mouseenter", (e, p) => { setHover(p.month.m); showPetalTip(p, e); })
+  .on("mousemove", (e, p) => placeTip(e.clientX, e.clientY))
+  .on("mouseleave", () => { setHover(null); hideTip(); })
+  .on("focus", (e, p) => onPetalFocus(p))
+  .on("blur", () => { hideTip(); setHover(null); focusHalo.style("display", "none"); focusRing.style("display", "none"); })
+  .on("keydown", onPetalKey);
+
+// Outlines of every "other" (black) petal, drawn above everything (rule 5).
+const outlines = outlineLayer.selectAll("path").data(y => monthsOf(y).map(mo => mo.petals[2])).join("path")
+  .attr("class", "other-outline");
+
+// Month labels, as on the plate: each sits on a clockwise arc centred on its own slice,
+// just outside the month's largest petal. Two lines per month: the name (outer) and,
+// when the full label doesn't fit the slice, the year on a second line inside it.
+const LABEL_FS = [12, 9.5];   // font size per rose: the smaller rose has smaller lettering, as engraved
+roses.attr("data-rose", y => y);
+const labelLines = months.flatMap(mo => [{ mo, line: 0 }, { mo, line: 1 }]);   // 0 = name, 1 = year
+const labelPaths = labelLayer.selectAll("path").data(y => labelLines.filter(d => d.mo.year === y)).join("path")
+  .attr("id", d => `lab-${d.mo.m}-${d.line}`).attr("fill", "none");
+const labels = labelLayer.selectAll("text").data(y => labelLines.filter(d => d.mo.year === y)).join("text")
+  .attr("class", "month-label")
+  .style("font-size", d => `${LABEL_FS[d.mo.year]}px`);
+labels.append("textPath")
+  .attr("href", d => `#lab-${d.mo.m}-${d.line}`)
+  .attr("startOffset", "50%").attr("text-anchor", "middle");
+
+captionLayer.append("text").attr("class", "caption-text").attr("text-anchor", "middle")
+  .attr("y", -232)
+  .text(y => y === 0 ? "1.  APRIL 1854 TO MARCH 1855" : "2.  APRIL 1855 TO MARCH 1856");
+
+/** Geometry per month for each encoding: outer petal radius and label placement. */
+function computeGeometry() {
+  // Measure the label texts once (after the web font has loaded).
+  const probe = labels.filter(d => d.line === 0).select("textPath");
+  const measure = (mo, text) => {
+    const el = probe.filter(d => d.mo === mo);
+    el.text(text);
+    const w = el.node().parentNode.getComputedTextLength();
+    return w;
+  };
+  for (const mo of months) {
+    mo.w = { full: measure(mo, mo.label), name: measure(mo, mo.name), year: measure(mo, String(mo.yearNum)) };
+    mo.hasYear = mo.label !== mo.name;
+  }
+  // Place after measuring everything: the small rose's circle depends on all twelve labels.
+  for (const mo of months) {
+    mo.geom = {};
+    for (const enc of ["area", "radius"]) mo.geom[enc] = placeLabel(mo, enc);
+  }
+}
+
+/**
+ * Label rules, following the plate:
+ *  - Year 1 (large rose): each label sits just outside its own month's largest petal,
+ *    no closer to the centre than a common ring, so small months line up.
+ *  - Year 2 (small rose): every month name rests on ONE circle just outside the rose's
+ *    largest petal (and large enough that every name fits its 30° slice).
+ *  - A label too wide for its slice puts the year on a second line, inside the name.
+ * Labels are always centred on their own slice, so they never stray into a neighbour's.
+ */
+const LABEL_RING = 122, LABEL_PAD = 8, CLEAR = 10;   // ring in petal-radius units; CLEAR = gap kept between labels
+function placeLabel(mo, enc) {
+  const rOuter = d3.max(mo.petals, p => radiusFor(p.rate, enc));
+  const fs = LABEL_FS[mo.year], lineGap = fs * 1.2;
+  const fits = (w, r) => w + CLEAR <= SLICE * r;
+  const rFor = w => (w + CLEAR) / SLICE;              // smallest radius at which width w fits
+  const c = startAngle(mo.slot) + SLICE / 2;
+
+  if (mo.year === 1) {
+    // One circle for the whole rose: outside its largest petal, and wide enough for every name.
+    const ms = monthsOf(1);
+    let R = Math.max(
+      d3.max(ms, m => d3.max(m.petals, p => radiusFor(p.rate, enc))) + LABEL_PAD,
+      d3.max(ms, m => rFor(m.w.name)));
+    // Two-line months put the year inside the circle; keep that clear of their own petals.
+    for (const m of ms) {
+      if (m.hasYear && !fits(m.w.full, R)) {
+        const ro = d3.max(m.petals, p => radiusFor(p.rate, enc));
+        R = Math.max(R, ro + LABEL_PAD + lineGap);
+      }
+    }
+    const two = mo.hasYear && !fits(mo.w.full, R);
+    return { rOuter, c, two, rName: R, rYear: R - lineGap };
+  }
+
+  let r = Math.max(rOuter + LABEL_PAD, LABEL_RING);   // baseline of the innermost line
+  if (fits(mo.w.full, r)) return { rOuter, c, two: false, rName: r, rYear: r };
+  if (!mo.hasYear) {
+    r = rFor(mo.w.full);
+    return { rOuter, c, two: false, rName: r, rYear: r };
+  }
+  // Two lines: year at r, name one line further out; both must fit.
+  r = Math.max(r, rFor(mo.w.year), rFor(mo.w.name) - lineGap);
+  return { rOuter, c, two: true, rName: r + lineGap, rYear: r };
+}
+
+/** Clockwise arc (so text reads clockwise; the lower half ends up upside down, as on the plate). */
+function labelArcPath(d, r) {
+  const c = startAngle(d.mo.slot) + SLICE / 2, span = (2 * Math.PI) / 3;
+  const [x0, y0] = polar(r, c - span / 2), [x1, y1] = polar(r, c + span / 2);
+  return `M${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1}`;
+}
+
+/** Text for each label line in the current encoding. */
+function labelText(d) {
+  const g = d.mo.geom[state.encoding];
+  if (d.line === 0) return g.two ? d.mo.name : d.mo.label;
+  return g.two ? String(d.mo.yearNum) : "";
+}
+
+/* Each element remembers its current radius in __r so encoding changes tween smoothly. */
+function tweenR(sel, targetR, pathFn, duration) {
+  sel.each(function (d) {
+    const el = d3.select(this), from = this.__r ?? targetR(d), to = targetR(d);
+    this.__r = to;
+    if (!duration) { el.attr("d", pathFn(d, to)); return; }
+    el.interrupt("geom").transition("geom").duration(duration).ease(d3.easeCubicInOut)
+      .attrTween("d", () => { const i = d3.interpolate(from, to); return t => pathFn(d, i(t)); });
+  });
+}
+
+function drawGeometry(duration = 0) {
+  const enc = state.encoding;
+  tweenR(petalSel, p => radiusFor(p.rate, enc), petalPath, duration);
+  tweenR(outlines, p => radiusFor(p.rate, enc), petalPath, duration);
+  tweenR(bgs, mo => Math.max(mo.geom[enc].rOuter, 22) + 5,
+    (mo, r) => arcGen({ outerRadius: r, startAngle: startAngle(mo.slot), endAngle: startAngle(mo.slot) + SLICE }), duration);
+  labels.select("textPath").text(labelText);
+  tweenR(labelPaths, d => d.line === 0 ? d.mo.geom[enc].rName : d.mo.geom[enc].rYear, labelArcPath, duration);
+
+  // Dashed connector: from the 9 o'clock edge of year 1 (between Mar 1855 and Apr 1854)
+  // to the 9 o'clock edge of year 2 (between Mar 1856 and Apr 1855). Drawn beneath the petals.
+  const edge = (a, b) => Math.max(months[a].geom[enc].rOuter, months[b].geom[enc].rOuter);
+  connector.interrupt("geom").transition("geom").duration(duration)
+    .attr("x1", ROSE_CX[0] - edge(11, 0)).attr("y1", ROSE_CY)
+    .attr("x2", ROSE_CX[1] - edge(23, 12) - 4).attr("y2", ROSE_CY);
+  if (duration) setTimeout(updateFocusRing, duration + 20); else updateFocusRing();
+}
+
+/** Paint order within each month; optionally animate the months whose order changed. */
+function applyStacking(animate) {
+  monthGroups.selectAll("path.petal").sort((a, b) => zOf(a) - zOf(b));
+  petalSel.attr("aria-label", ariaLabel);
+  if (animate) {
+    // Re-"engrave" the changed months back to front so the new order is visible.
+    petalSel.filter(p => p.month.changed)
+      .interrupt("stack").style("opacity", 0)
+      .transition("stack").delay(p => 150 + zOf(p) * 280).duration(320).style("opacity", null);
+  }
+  bgs.classed("changed", mo => state.showChanged && mo.changed);
+  labels.classed("changed", d => state.showChanged && d.mo.changed);
+  const n = months.filter(mo => mo.changed).length;
+  d3.select("#stack-status").html(state.showChanged
+    ? `<strong>${n} of 24</strong> months differ between the two orders (outlined).`
+    : "Petals overlap from the centre; order decides what is hidden.");
+  updateLineChanged();
+}
+
+/* =========================================================================
+   5. HOVER, FILTER, FOCUS
+   ========================================================================= */
+function setHover(m) {
+  state.hover = m;
+  monthGroups.classed("month-dim", mo => m != null && mo.m !== m);
+  outlines.classed("month-dim", p => m != null && p.month.m !== m);
+  bgs.classed("hovered", mo => mo.m === m);
+  labels.classed("hovered", d => d.mo.m === m);
+  updateLineHover();
+}
+
+function applyIsolate() {
+  const iso = state.isolate;
+  petalSel.classed("faded", p => iso && p.cause !== iso);
+  outlines.classed("faded", () => iso && iso !== "other");
+  d3.selectAll(".legend-item")
+    .attr("aria-pressed", function () { return String(this.dataset.cause === iso); })
+    .classed("dimmed", function () { return iso && this.dataset.cause !== iso; });
+  lineSeries.classed("faded", s => iso && s.key !== iso);
+  lineLabels.classed("faded", s => iso && s.key !== iso);
+}
+
+function ariaLabel(p) {
+  return `${p.month.title}, ${CAUSE[p.cause].long}: ${fmtInt(p.deaths)} deaths in an army of ${fmtInt(p.month.army)}; ` +
+    `rate ${fmt1(p.rate)} per 1,000 per year; drawn at the ${POSITION[zOf(p)]}.`;
+}
+
+function onPetalFocus(p) {
+  state.focusIdx = p.idx;
+  petalSel.attr("tabindex", q => q.idx === p.idx ? 0 : -1);
+  setHover(p.month.m);
+  updateFocusRing();
+  const r = petalSel.filter(q => q.idx === p.idx).node().getBoundingClientRect();
+  showPetalTip(p);
+  placeTip(r.left + r.width / 2, r.top + r.height / 2);
+}
+
+function updateFocusRing() {
+  const p = petals[state.focusIdx], el = petalSel.filter(q => q.idx === p.idx).node();
+  if (document.activeElement !== el) return;
+  const r = Math.max(radiusFor(p.rate, state.encoding), 10);   // keep tiny wedges visible
+  const d = petalPath(p, r);
+  const tf = `translate(${ROSE_CX[p.month.year]},${ROSE_CY})`;
+  focusHalo.attr("d", d).attr("transform", tf).style("display", null);
+  focusRing.attr("d", d).attr("transform", tf).style("display", null);
+}
+
+function onPetalKey(e, p) {
+  let m = p.month.m, c = p.ci;
+  switch (e.key) {
+    case "ArrowRight": m = (m + 1) % 24; break;
+    case "ArrowLeft":  m = (m + 23) % 24; break;
+    case "ArrowDown":  c = (c + 1) % 3; break;
+    case "ArrowUp":    c = (c + 2) % 3; break;
+    case "Home": m = 0; break;
+    case "End":  m = 23; break;
+    case "Escape": e.target.blur(); return;
+    default: return;
+  }
+  e.preventDefault();
+  petalSel.filter(q => q.idx === m * 3 + c).node().focus();
+}
+
+/* =========================================================================
+   6. TOOLTIP
+   ========================================================================= */
+const tip = d3.select("#tooltip");
+const fmtInt = d3.format(",");
+const fmt1 = d3.format(",.1f");
+const swatch = c => `<span class="sw" style="background:${CAUSE[c].fill};border-color:${CAUSE[c].edge}"></span>`;
+
+function showPetalTip(p, e) {
+  const posNow = zOf(p), other = state.stacking === "engraved" ? p.zLarge : p.zEng;
+  const otherName = state.stacking === "engraved" ? "largest at back" : "as engraved";
+  tip.html(`
+    <div class="tt-title">${p.month.title}</div>
+    <div class="tt-cause">${swatch(p.cause)} ${CAUSE[p.cause].long}</div>
+    <table>
+      <tr><td>Deaths</td><td>${fmtInt(p.deaths)}</td></tr>
+      <tr><td>Army size</td><td>${fmtInt(p.month.army)}</td></tr>
+      <tr><td>Annual rate per 1,000</td><td><b>${fmt1(p.rate)}</b></td></tr>
+      <tr><td>Stacking position</td><td>${POSITION[posNow]} (${posNow + 1} of 3)</td></tr>
+      <tr><td class="muted">…if ${otherName}</td><td class="muted">${POSITION[other]}${other !== posNow ? " ◆" : ""}</td></tr>
+    </table>`).classed("show", true);
+  if (e) placeTip(e.clientX, e.clientY);
+}
+function showHtmlTip(html, x, y) { tip.html(html).classed("show", true); placeTip(x, y); }
+function placeTip(x, y) {
+  const n = tip.node(), w = n.offsetWidth, h = n.offsetHeight, pad = 14;
+  let left = x + pad, top = y + pad;
+  if (left + w > window.innerWidth - 8) left = x - w - pad;
+  if (top + h > window.innerHeight - 8) top = y - h - pad;
+  tip.style("left", `${Math.max(8, left)}px`).style("top", `${Math.max(8, top)}px`);
+}
+function hideTip() { tip.classed("show", false); }
+
+/* =========================================================================
+   7. LEGEND (cause filter)
+   ========================================================================= */
+const legend = d3.select("#legend");
+legend.selectAll("button").data(CAUSES).join("button")
+  .attr("type", "button").attr("class", "legend-item").attr("data-cause", c => c.key).attr("aria-pressed", "false")
+  .html(c => `<span class="sw" style="background:${c.fill};border-color:${c.edge}"></span>${c.long}`)
+  .on("click", (e, c) => { state.isolate = state.isolate === c.key ? null : c.key; applyIsolate(); });
+legend.append("span").attr("class", "legend-hint").text("Click a cause to isolate it; click again to show all.");
+
+/* =========================================================================
+   8. LINKED LINE CHART
+   ========================================================================= */
+const LW = 1200, LH = 300, LM = { t: 18, r: 150, b: 46, l: 64 };
+const lsvg = d3.select("#lines").attr("viewBox", `0 0 ${LW} ${LH}`);
+const lx = d3.scalePoint().domain(d3.range(24)).range([LM.l, LW - LM.r]).padding(0.5);
+const ly = d3.scaleLinear().domain([0, 1100]).range([LH - LM.b, LM.t]);
+const step = lx.step();
+
+lsvg.append("g").attr("class", "grid").attr("transform", `translate(${LM.l},0)`)
+  .call(d3.axisLeft(ly).ticks(6).tickSize(-(LW - LM.l - LM.r)).tickFormat(""));
+lsvg.append("g").attr("class", "axis").attr("transform", `translate(${LM.l},0)`)
+  .call(d3.axisLeft(ly).ticks(6).tickFormat(d3.format(",")));
+lsvg.append("text").attr("class", "year-tag").attr("transform", `translate(16,${(LH - LM.b + LM.t) / 2}) rotate(-90)`)
+  .attr("text-anchor", "middle").text("Annual rate per 1,000");
+lsvg.append("g").attr("class", "axis").attr("transform", `translate(0,${LH - LM.b})`)
+  .call(d3.axisBottom(lx).tickFormat(m => {
+    const mo = months[m]; return mo.name.slice(0, 3).charAt(0) + mo.name.slice(1, 3).toLowerCase();
+  }));
+lsvg.append("g").attr("class", "axis").attr("transform", `translate(0,${LH - LM.b + 18})`)
+  .selectAll("text").data(months.filter(mo => mo.slot === 0 || mo.name === "JANUARY")).join("text")
+  .attr("x", mo => lx(mo.m)).attr("y", 12).attr("text-anchor", "middle").text(mo => mo.yearNum);
+const xDiv = (lx(11) + lx(12)) / 2;
+lsvg.append("line").attr("class", "year-divider").attr("x1", xDiv).attr("x2", xDiv).attr("y1", LM.t).attr("y2", LH - LM.b);
+lsvg.append("text").attr("class", "year-tag").attr("x", xDiv - 8).attr("y", LM.t + 12).attr("text-anchor", "end").text("Year 1 (right rose)");
+lsvg.append("text").attr("class", "year-tag").attr("x", xDiv + 8).attr("y", LM.t + 12).text("Year 2 (left rose)");
+
+const changedTicks = lsvg.append("g");
+const hoverBand = lsvg.append("rect").attr("y", LM.t).attr("height", LH - LM.b - LM.t).attr("width", step)
+  .attr("fill", "rgba(43,38,35,.06)").style("display", "none");
+
+const lineGen = d3.line().x(d => lx(d.month.m)).y(d => ly(d.rate));
+const seriesData = CAUSES.map((c, ci) => ({ key: c.key, label: c.short, values: months.map(mo => mo.petals[ci]) }));
+const lineSeries = lsvg.append("g").selectAll("path").data(seriesData).join("path")
+  .attr("class", s => `series ${s.key}`).attr("d", s => lineGen(s.values));
+
+// Direct labels at the right end, nudged apart so they never overlap.
+// Work upward from the lowest label, keeping clear of the x-axis.
+const endY = seriesData.map(s => ({ s, y: ly(s.values[23].rate) })).sort((a, b) => b.y - a.y);
+endY[0].y = Math.min(endY[0].y, LH - LM.b - 6);
+for (let i = 1; i < endY.length; i++) endY[i].y = Math.min(endY[i].y, endY[i - 1].y - 15);
+const lineLabels = lsvg.append("g").selectAll("text").data(endY.map(e => e.s)).join("text")
+  .attr("class", "series-label").attr("x", lx(23) + 10).attr("y", s => endY.find(e => e.s === s).y + 4)
+  .text(s => s.label);
+
+const hoverRule = lsvg.append("line").attr("class", "hover-rule").attr("y1", LM.t).attr("y2", LH - LM.b).style("display", "none");
+const hoverDots = lsvg.append("g").selectAll("circle").data(CAUSES).join("circle")
+  .attr("class", "hover-dot").attr("r", 4.5).attr("fill", c => getComputedStyle(document.documentElement).getPropertyValue(`--${c.key}-line`))
+  .style("display", "none");
+
+// Invisible hit targets, one per month, wider than the marks.
+lsvg.append("g").selectAll("rect").data(months).join("rect")
+  .attr("x", mo => lx(mo.m) - step / 2).attr("width", step).attr("y", LM.t).attr("height", LH - LM.b - LM.t)
+  .attr("fill", "transparent")
+  .on("mouseenter", (e, mo) => { setHover(mo.m); showMonthTip(mo, e); })
+  .on("mousemove", e => placeTip(e.clientX, e.clientY))
+  .on("mouseleave", () => { setHover(null); hideTip(); });
+
+function showMonthTip(mo, e) {
+  const rows = mo.petals.map(p => `<tr><td><span class="tt-cause" style="font-weight:400">${swatch(p.cause)}${CAUSE[p.cause].short}</span></td><td><b>${fmt1(p.rate)}</b></td></tr>`).join("");
+  showHtmlTip(`<div class="tt-title">${mo.title}</div><div class="muted">Army ${fmtInt(mo.army)} · rate per 1,000</div><table>${rows}</table>`, e.clientX, e.clientY);
+}
+
+function updateLineHover() {
+  const m = state.hover;
+  const on = m != null;
+  hoverRule.style("display", on ? null : "none");
+  hoverBand.style("display", on ? null : "none");
+  hoverDots.style("display", on ? null : "none");
+  if (!on) return;
+  const x = lx(m);
+  hoverRule.attr("x1", x).attr("x2", x);
+  hoverBand.attr("x", x - step / 2);
+  hoverDots.attr("cx", x).attr("cy", (c, ci) => ly(months[m].petals[ci].rate));
+}
+function updateLineChanged() {
+  changedTicks.selectAll("path").data(state.showChanged ? months.filter(mo => mo.changed) : []).join("path")
+    .attr("class", "changed-tick")
+    .attr("d", mo => `M${lx(mo.m)},${LH - LM.b - 9} l5,8 h-10 z`)
+    .append("title").text(mo => `${mo.title}: stacking order differs`);
+}
+
+/* =========================================================================
+   9. TEACHING READOUT — area vs radius, measured from the drawn geometry
+   ========================================================================= */
+function updateReadout() {
+  const jan = months[9].petals[0], oct = months[6].petals[0];   // Jan 1855 and Oct 1854, disease
+  const rateRatio = jan.rate / oct.rate;
+  const area = (p, enc) => 0.5 * radiusFor(p.rate, enc) ** 2 * SLICE;  // sector area = ½ r² θ
+  const areaRatio = area(jan, state.encoding) / area(oct, state.encoding);
+  const wrong = state.encoding === "radius";
+  d3.select("#readout").html(`
+    <div>Jan 1855 vs Oct 1854, disease<br>rate ratio <span class="big">${rateRatio.toFixed(2)}×</span></div>
+    <div>Drawn petal area ratio now<br><span class="big ${wrong ? "warn" : ""}">${areaRatio.toFixed(2)}×</span>
+      ${wrong ? ' <span class="warn">— exaggerated ' + (areaRatio / rateRatio).toFixed(1) + '-fold</span>' : ' — matches the data'}</div>
+    <div>${wrong
+      ? "<b>Radius ∝ rate</b> makes area grow with rate², so big months swell and small ones vanish. Year 2 almost disappears."
+      : "<b>Area ∝ rate</b>: radius = k·√rate, one k for both roses. Year 2 is smaller only because fewer men died."}</div>`);
+  d3.select("#enc-status").html(wrong ? '<span class="warn">Wrong encoding (for teaching)</span>' : "Nightingale's encoding");
+}
+
+/* =========================================================================
+   10. NOTE ON THE LEGEND ("the blue coincides with the black")
+   ========================================================================= */
+const rateAt = (m, c) => months[m].petals[c].rate;   // month index, cause index
+const NOTE = `In January and February <b>1855</b> the disease rate was roughly 6–8 times the “other” rate
+  (${fmt1(rateAt(9,0))} vs ${fmt1(rateAt(9,2))}, i.e. ${(rateAt(9,0)/rateAt(9,2)).toFixed(1)}×; ${fmt1(rateAt(10,0))} vs ${fmt1(rateAt(10,2))}, ${(rateAt(10,0)/rateAt(10,2)).toFixed(1)}×),
+  so blue cannot coincide with black. In January and February <b>1856</b> the two are nearly equal
+  (${fmt1(rateAt(21,0))} vs ${fmt1(rateAt(21,2))}; ${fmt1(rateAt(22,0))} vs ${fmt1(rateAt(22,2))}), so the legend seems to have the wrong year.`;
+d3.select("#note-text").html(NOTE);
+const marker = d3.select("#note-marker");
+const showNote = () => { const b = marker.node().getBoundingClientRect(); showHtmlTip(`<div style="max-width:280px">${NOTE}</div>`, b.right, b.bottom); };
+marker.on("mouseenter", showNote).on("focus", showNote).on("mouseleave", hideTip).on("blur", hideTip)
+  .on("click", showNote).on("keydown", e => { if (e.key === "Escape") hideTip(); });
+
+/* =========================================================================
+   11. DATA TABLE + SANITY CHECKS
+   ========================================================================= */
+function buildTable() {
+  const order = (mo, key) => [...mo.petals].sort((a, b) => a[key] - b[key]).map(p => p.cause[0].toUpperCase()).join(" → ");
+  const t = d3.select("#datatable");
+  t.append("thead").append("tr").selectAll("th")
+    .data(["Month", "Army", "Disease", "Wounds", "Other", "Disease rate", "Wounds rate", "Other rate", "Engraved order", "Largest-at-back order"])
+    .join("th").text(d => d);
+  t.append("tbody").selectAll("tr").data(months).join("tr").attr("class", mo => mo.changed ? "changed" : null)
+    .selectAll("td").data(mo => [mo.title, fmtInt(mo.army), ...mo.petals.map(p => fmtInt(p.deaths)),
+      ...mo.petals.map(p => fmt1(p.rate)), order(mo, "zEng"), order(mo, "zLarge")])
+    .join("td").text(d => d);
+}
+
+function runChecks() {
+  const find = (date, cause) => months.find(mo => mo.date === date).petals.find(p => p.cause === cause).rate;
+  const checks = [
+    ["Jan 1855 disease rate", find("1855-01", "disease"), 1022.8],
+    ["Oct 1854 wounds rate",  find("1854-10", "wounds"),  51.7],
+    ["Oct 1854 other rate",   find("1854-10", "other"),   50.1],
+    ["Jan 1856 disease rate", find("1856-01", "disease"), 11.4],
+    ["Jan 1856 other rate",   find("1856-01", "other"),   13.0],
+  ].map(([name, got, want]) => ({ name, got: +got.toFixed(1), want, pass: Math.abs(got - want) < 0.05 }));
+  // Area check: in area mode, the drawn sector areas must be in the ratio of the rates (~5.2).
+  const jan = months[9].petals[0], oct = months[6].petals[0];
+  const areaRatio = (radiusFor(jan.rate, "area") / radiusFor(oct.rate, "area")) ** 2;
+  checks.push({ name: "Area ratio Jan 1855 / Oct 1854 disease petals", got: +areaRatio.toFixed(2), want: 5.2, pass: Math.abs(areaRatio - 5.2) < 0.05 });
+  const nChanged = months.filter(mo => mo.changed).length;
+  checks.push({ name: "Months whose order changes", got: nChanged, want: 9, pass: nChanged === 9 });
+  console.table(checks);
+  checks.forEach(c => console.assert(c.pass, `Check failed: ${c.name} = ${c.got}, expected ${c.want}`));
+  d3.select("#checks").selectAll("li").data(checks).join("li")
+    .html(c => `<span class="${c.pass ? "ok" : "bad"}">${c.pass ? "✓" : "✗"}</span> ${c.name}: ${c.got} (expected ≈ ${c.want})`);
+}
+
+/* =========================================================================
+   12. CONTROLS + INITIAL RENDER
+   ========================================================================= */
+function wireSeg(id, key, onChange) {
+  d3.selectAll(`#${id} button`).on("click", function () {
+    if (state[key] === this.dataset.val) return;
+    state[key] = this.dataset.val;
+    d3.selectAll(`#${id} button`).attr("aria-pressed", function () { return String(this.dataset.val === state[key]); });
+    onChange();
+  });
+}
+wireSeg("ctl-stack", "stacking", () => { state.showChanged = true; applyStacking(true); });
+wireSeg("ctl-enc", "encoding", () => { drawGeometry(900); updateReadout(); });
+d3.select("#ctl-outline").on("change", function () {
+  state.outlines = this.checked;
+  outlineLayer.style("display", state.outlines ? null : "none");
+});
+
+/** Fit the viewBox to the drawing (area mode is the larger extent). */
+function fitViewBox() {
+  const b = root.node().getBBox(), pad = 16;
+  svg.attr("viewBox", `${b.x - pad} ${b.y - pad} ${b.width + 2 * pad} ${b.height + 2 * pad}`);
+}
+
+(document.fonts ? document.fonts.ready : Promise.resolve()).then(() => {
+  computeGeometry();
+  drawGeometry(0);
+  applyStacking(false);
+  applyIsolate();
+  updateReadout();
+  buildTable();
+  runChecks();
+  fitViewBox();
+});
+</script>
+</body>
+</html>
